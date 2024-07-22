@@ -4,11 +4,11 @@ pragma solidity ^0.8.24;
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-error FaucetAlreadyClaimed(address claimer);
-error FaucetInsufficientFunds(uint256 requested, uint256 available);
-error ClaimTooSoon(uint256 timeLeft);
-
 contract Faucet is Ownable {
+    error FaucetAlreadyClaimed(address claimer);
+    error FaucetInsufficientFunds(uint256 requested, uint256 available);
+    error ClaimTooSoon(uint256 timeLeft);
+
     IERC20 public token;
     uint256 public amountAllowed;
     // mapping(address => bool) public hasClaimed;

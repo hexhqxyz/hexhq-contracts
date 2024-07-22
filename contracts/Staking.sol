@@ -7,11 +7,13 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/Pausable.sol";
 
-error AmountMustBeGreaterThanZero();
-error AmountNotEnough();
-error TransferFailed();
-
 contract Staking is ReentrancyGuard, Ownable, Pausable {
+    error AmountMustBeGreaterThanZero();
+    error AmountNotEnough();
+    error TransferFailed();
+    error LoanNotRepaid();
+    error InsufficientCollateral();
+
     IERC20 public s_stakingToken;
     IERC20 public s_rewardToken;
 
@@ -19,26 +21,36 @@ contract Staking is ReentrancyGuard, Ownable, Pausable {
     uint256 private totalStakedTokens;
     uint256 public rewardPerTokenStored;
     uint256 public lastUpdateTime;
+    uint256 public interestRate; // Annual interest rate for loans
 
     mapping(address => uint256) public stakedBalance;
     mapping(address => uint256) public rewards;
     mapping(address => uint256) public userRewardPerTokenPaid;
+    mapping(address => uint256) public borrowedAmount;
+    mapping(address => uint256) public loanStartTime;
 
     event Staked(address indexed user, uint256 indexed amount);
     event Withdrawn(address indexed user, uint256 indexed amount);
     event RewardsClaimed(address indexed user, uint256 indexed amount);
     event RewardRateUpdated(uint256 newRewardRate);
     event EmergencyWithdrawal(address indexed user, uint256 indexed amount);
+    event LoanTaken(address indexed user, uint256 indexed amount);
+    event LoanRepaid(address indexed user, uint256 indexed amount);
 
     constructor(address stakingToken, address rewardToken) Ownable(msg.sender) {
         s_stakingToken = IERC20(stakingToken);
         s_rewardToken = IERC20(rewardToken);
         rewardRate = 1e15; // Initial reward rate
+        interestRate = 5; // 5% annual interest rate
     }
 
     function setRewardRate(uint256 _rewardRate) external onlyOwner {
         rewardRate = _rewardRate;
         emit RewardRateUpdated(_rewardRate);
+    }
+
+    function setInterestRate(uint256 _interestRate) external onlyOwner {
+        interestRate = _interestRate;
     }
 
     function rewardPerToken() public view returns (uint256) {
@@ -52,8 +64,11 @@ contract Staking is ReentrancyGuard, Ownable, Pausable {
     }
 
     function earned(address account) public view returns (uint256) {
+        uint256 effectiveStakedBalance = stakedBalance[account] -
+            borrowedAmount[account];
+
         return
-            ((stakedBalance[account] *
+            ((effectiveStakedBalance *
                 (rewardPerToken() - userRewardPerTokenPaid[account])) / 1e18) +
             rewards[account];
     }
@@ -86,6 +101,8 @@ contract Staking is ReentrancyGuard, Ownable, Pausable {
     ) external nonReentrant whenNotPaused updateReward(msg.sender) {
         if (amount <= 0) revert AmountMustBeGreaterThanZero();
         if (stakedBalance[msg.sender] < amount) revert AmountNotEnough();
+        if (borrowedAmount[msg.sender] > 0) revert LoanNotRepaid(); // Prevent withdrawal if there's an outstanding loan
+
         totalStakedTokens -= amount;
         stakedBalance[msg.sender] -= amount;
         emit Withdrawn(msg.sender, amount);
@@ -99,6 +116,8 @@ contract Staking is ReentrancyGuard, Ownable, Pausable {
         whenNotPaused
         updateReward(msg.sender)
     {
+        if (borrowedAmount[msg.sender] > 0) revert LoanNotRepaid();
+
         uint256 reward = rewards[msg.sender];
         if (reward < 0) revert AmountNotEnough();
 
@@ -108,14 +127,44 @@ contract Staking is ReentrancyGuard, Ownable, Pausable {
         if (!success) revert TransferFailed();
     }
 
-    function emergencyWithdraw() external nonReentrant whenPaused {
-        uint256 amount = stakedBalance[msg.sender];
+    function takeLoan(uint256 amount) external nonReentrant whenNotPaused {
         if (amount <= 0) revert AmountMustBeGreaterThanZero();
-        totalStakedTokens -= amount;
-        stakedBalance[msg.sender] = 0;
-        emit EmergencyWithdrawal(msg.sender, amount);
-        bool success = s_stakingToken.transfer(msg.sender, amount);
+        if (borrowedAmount[msg.sender] > 0) revert LoanNotRepaid();
+        if ((stakedBalance[msg.sender] * 80) / 100 < amount)
+            revert InsufficientCollateral(); // Borrow up to 80% of staked amount
+
+        borrowedAmount[msg.sender] += amount;
+        loanStartTime[msg.sender] = block.timestamp;
+        emit LoanTaken(msg.sender, amount);
+        bool success = s_rewardToken.transfer(msg.sender, amount); // Use reward token for loans
         if (!success) revert TransferFailed();
+    }
+
+    function repayLoan(uint256 amount) external nonReentrant whenNotPaused {
+        if (amount <= 0) revert AmountMustBeGreaterThanZero();
+        if (borrowedAmount[msg.sender] < amount) revert AmountNotEnough();
+        uint256 interest = calculateInterest(msg.sender);
+        require(
+            s_rewardToken.transferFrom(
+                msg.sender,
+                address(this),
+                amount + interest
+            ),
+            "Transfer failed"
+        );
+        borrowedAmount[msg.sender] -= amount;
+        if (borrowedAmount[msg.sender] == 0) {
+            loanStartTime[msg.sender] = 0;
+        }
+        emit LoanRepaid(msg.sender, amount);
+    }
+
+    function calculateInterest(address account) public view returns (uint256) {
+        uint256 timeElapsed = ((block.timestamp - loanStartTime[account]) /
+            20) * 20; // Round down to the nearest 20 seconds
+        uint256 annualInterest = (borrowedAmount[account] * interestRate) / 100;
+        uint256 interest = (annualInterest * timeElapsed) / 365 days;
+        return interest;
     }
 
     function pause() external onlyOwner {
@@ -126,16 +175,25 @@ contract Staking is ReentrancyGuard, Ownable, Pausable {
         _unpause();
     }
 
-    // Additional functions to retrieve information for the frontend
-    function totalStaked() external view returns (uint256) {
-        return totalStakedTokens;
+    function borrowedBalanceOf(
+        address account
+    ) external view returns (uint256) {
+        return borrowedAmount[account];
     }
 
-    function stakedBalanceOf(address account) external view returns (uint256) {
-        return stakedBalance[account];
+    function calculateBorrowLimit(
+        address account
+    ) external view returns (uint256) {
+        if (borrowedAmount[msg.sender] > 0 || stakedBalance[account] <= 0)
+            return 0; // if outstanding loan
+
+        return (stakedBalance[account] * 80) / 100; // 80% of staked amount
     }
 
-    function rewardBalanceOf(address account) external view returns (uint256) {
-        return rewards[account];
+    function calculateRepayAmount(
+        address account
+    ) external view returns (uint256) {
+        uint256 interest = calculateInterest(account);
+        return borrowedAmount[account] + interest;
     }
 }
