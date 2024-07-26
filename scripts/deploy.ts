@@ -5,13 +5,14 @@ import StakingModule from "../ignition/modules/Staking";
 import FaucetModule from "../ignition/modules/Faucet";
 import AMMModule from "../ignition/modules/AMM";
 
+const TOKEN_DECIMAL = 18;
 async function main() {
   const initialSupply = 100000; // 1,000,000 tokens
-  const faucetFundingAmount = ethers.parseUnits("1000", 18);
-  const faucetAmountAllowedPerPerson = ethers.parseUnits("7", 18);
-  const initialAmmSupply = ethers.parseUnits("5000", 18);
-  const rewardAmount = ethers.parseUnits("10000", 18);
-  const initialStakingApprove = ethers.parseUnits("2000", 18);
+  const faucetFundingAmount = ethers.parseUnits("1000", TOKEN_DECIMAL);
+  const faucetAmountAllowedPerPerson = ethers.parseUnits("8", TOKEN_DECIMAL);
+  const initialAmmSupply = ethers.parseUnits("5000", TOKEN_DECIMAL);
+  const rewardAmount = ethers.parseUnits("10000", TOKEN_DECIMAL);
+  const initialStakingApprove = ethers.parseUnits("2000", TOKEN_DECIMAL);
 
   const { stakingToken } = await hre.ignition.deploy(StakingTokenModule, {
     parameters: { StakingToken: { initialSupply: initialSupply } },
@@ -45,7 +46,7 @@ async function main() {
 
   const { AMM } = await hre.ignition.deploy(AMMModule, {
     parameters: {
-      Staking: {
+      AMM: {
         stakingTokenAddress: stakingToken.target as string,
         rewardTokenAddress: rewardToken.target as string,
       },
@@ -71,10 +72,7 @@ async function main() {
     `Approved staking contract to spend tokens and funded with reward tokens.`
   );
   console.log(
-    `Funded the faucet contract with ${ethers.formatUnits(
-      faucetFundingAmount,
-      18
-    )} tokens.`
+    `Funded the faucet contract with 1000 tokens.`
   );
 }
 
