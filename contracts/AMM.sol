@@ -7,47 +7,88 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
 contract AMM is ReentrancyGuard, Ownable {
+    error AmountMustBeGreaterThanZero();
+    error InsufficientLiquidity();
+    error InvalidAmounts();
+    error InvalidAddress();
+    error InvalidReserves();
+    error PoolRatioMismatch();
+
     IERC20 public token1;
     IERC20 public token2;
     uint256 public totalLiquidity;
     mapping(address => uint256) public liquidity;
-    uint256 public swapFee; // Fee percentage in basis points (100 basis points = 1%)
+    uint256 public swapFee;
 
-    event LiquidityProvided(address indexed provider, uint256 indexed amount1, uint256 indexed amount2);
-    event LiquidityRemoved(address indexed provider, uint256 indexed amount1, uint256 indexed amount2);
-    event Swapped(address indexed swapper, address indexed tokenIn, address indexed tokenOut, uint256 amountIn, uint256 amountOut, uint256 fee);
+    event LiquidityProvided(
+        address indexed provider,
+        uint256 indexed amount1,
+        uint256 indexed amount2
+    );
+    event LiquidityRemoved(
+        address indexed provider,
+        uint256 indexed amount1,
+        uint256 indexed amount2
+    );
+    event Swapped(
+        address indexed swapper,
+        address indexed tokenIn,
+        address indexed tokenOut,
+        uint256 amountIn,
+        uint256 amountOut,
+        uint256 fee
+    );
 
-    constructor(address _token1, address _token2, uint256 _swapFee) Ownable(msg.sender) {
+    constructor(address _token1, address _token2) Ownable(msg.sender) {
         token1 = IERC20(_token1);
         token2 = IERC20(_token2);
-        swapFee = _swapFee;
+        swapFee = 1e18; // 1% fee represented as 1e18
     }
 
-    function provideLiquidity(uint256 amount1, uint256 amount2) external nonReentrant {
-        require(amount1 > 0 && amount2 > 0, "Amounts must be greater than zero");
+    modifier checkAmount(uint256 amount) {
+        if (amount <= 0) revert AmountMustBeGreaterThanZero();
+        _;
+    }
 
+    modifier checkAmounts(uint256 amount1, uint256 amount2) {
+        if (amount1 <= 0 || amount2 <= 0) revert AmountMustBeGreaterThanZero();
+        _;
+    }
+
+    function provideLiquidity(
+        uint256 amount1,
+        uint256 amount2
+    ) external nonReentrant checkAmounts(amount1, amount2) {
         uint256 token1Reserve = token1.balanceOf(address(this));
         uint256 token2Reserve = token2.balanceOf(address(this));
 
         if (totalLiquidity > 0) {
-            require(amount1 * token2Reserve == amount2 * token1Reserve, "Provided amounts do not match the pool's current ratio");
+            if (amount1 * token2Reserve != amount2 * token1Reserve)
+                revert PoolRatioMismatch();
         }
 
         token1.transferFrom(msg.sender, address(this), amount1);
         token2.transferFrom(msg.sender, address(this), amount2);
 
-        uint256 liquidityMinted = (totalLiquidity == 0) ? sqrt(amount1 * amount2) : (amount1 * totalLiquidity) / token1Reserve;
+        uint256 liquidityMinted = (totalLiquidity == 0)
+            ? sqrt(amount1 * amount2)
+            : (amount1 * totalLiquidity) / token1Reserve;
         liquidity[msg.sender] += liquidityMinted;
         totalLiquidity += liquidityMinted;
 
         emit LiquidityProvided(msg.sender, amount1, amount2);
     }
 
-    function removeLiquidity(uint256 liquidityAmount) external nonReentrant {
-        require(liquidity[msg.sender] >= liquidityAmount, "Insufficient liquidity");
+    function removeLiquidity(
+        uint256 liquidityAmount
+    ) external nonReentrant checkAmount(liquidityAmount) {
+        if (liquidity[msg.sender] < liquidityAmount)
+            revert InsufficientLiquidity();
 
-        uint256 token1Amount = (liquidityAmount * token1.balanceOf(address(this))) / totalLiquidity;
-        uint256 token2Amount = (liquidityAmount * token2.balanceOf(address(this))) / totalLiquidity;
+        uint256 token1Amount = (liquidityAmount *
+            token1.balanceOf(address(this))) / totalLiquidity;
+        uint256 token2Amount = (liquidityAmount *
+            token2.balanceOf(address(this))) / totalLiquidity;
 
         liquidity[msg.sender] -= liquidityAmount;
         totalLiquidity -= liquidityAmount;
@@ -58,71 +99,117 @@ contract AMM is ReentrancyGuard, Ownable {
         emit LiquidityRemoved(msg.sender, token1Amount, token2Amount);
     }
 
-    function swap(address tokenIn, uint256 amountIn) external nonReentrant returns (uint256 amountOut, uint256 fee) {
-        require(amountIn > 0, "Amount must be greater than zero");
-
-        IERC20 inputToken = IERC20(tokenIn);
-        IERC20 outputToken = (tokenIn == address(token1)) ? token2 : token1;
+    /**
+     * @notice Swaps tokens in this contract between two tokens (token1 and token2).
+     * @dev The amount of input tokens must be greater than zero.
+     * @param tokenIn Address of the ERC20 token to swap from. It should be either `address(token1)` or `address(token2)`.
+     * @param amountIn Amount of input tokens to swap.
+     * @return amountOut Returns the amount of output tokens received.
+     * @return fee Returns the fee charged for this swap.
+     */
+    function swap(
+        address tokenIn,
+        uint256 amountIn
+    )
+        external
+        nonReentrant
+        checkAmount(amountIn)
+        returns (uint256 amountOut, uint256 fee)
+    {
+        (IERC20 inputToken, IERC20 outputToken) = getTokenPair(tokenIn);
 
         uint256 inputReserve = inputToken.balanceOf(address(this));
         uint256 outputReserve = outputToken.balanceOf(address(this));
-
         inputToken.transferFrom(msg.sender, address(this), amountIn);
 
-        uint256 inputAmountWithFee = amountIn * (10000 - swapFee) / 10000; // Apply fee
+        fee = (amountIn * swapFee) / 1e20; // Calculate fee as a percentage
+        uint256 inputAmountWithFee = amountIn - fee; // Apply fee
         uint256 numerator = inputAmountWithFee * outputReserve;
-        uint256 denominator = inputReserve * 10000 + inputAmountWithFee;
+        uint256 denominator = inputReserve + inputAmountWithFee;
         amountOut = numerator / denominator;
 
         outputToken.transfer(msg.sender, amountOut);
 
-        fee = (amountIn * swapFee) / 10000; // Calculate fee
-        emit Swapped(msg.sender, tokenIn, address(outputToken), amountIn, amountOut, fee);
+        emit Swapped(
+            msg.sender,
+            tokenIn,
+            address(outputToken),
+            amountIn,
+            amountOut,
+            fee
+        );
     }
 
-    function getSwapDetails(address tokenIn, uint256 amountIn) external view returns (uint256 amountOut, uint256 fee, uint256 newPrice) {
-        require(amountIn > 0, "Amount must be greater than zero");
-
-        IERC20 inputToken = IERC20(tokenIn);
-        IERC20 outputToken = (tokenIn == address(token1)) ? token2 : token1;
+    function getSwapDetails(
+        address tokenIn,
+        uint256 amountIn
+    )
+        external
+        view
+        checkAmount(amountIn)
+        returns (uint256 amountOut, uint256 fee, uint256 newPrice)
+    {
+        (IERC20 inputToken, IERC20 outputToken) = getTokenPair(tokenIn);
 
         uint256 inputReserve = inputToken.balanceOf(address(this));
         uint256 outputReserve = outputToken.balanceOf(address(this));
 
-        uint256 inputAmountWithFee = amountIn * (10000 - swapFee) / 10000; // Apply fee
+        fee = (amountIn * swapFee) / 1e20; // Calculate fee as a percentage
+        uint256 inputAmountWithFee = amountIn - fee; // Apply fee
         uint256 numerator = inputAmountWithFee * outputReserve;
-        uint256 denominator = inputReserve * 10000 + inputAmountWithFee;
+        uint256 denominator = inputReserve + inputAmountWithFee;
         amountOut = numerator / denominator;
 
-        fee = (amountIn * swapFee) / 10000; // Calculate fee
-        newPrice = (inputReserve + amountIn) / (outputReserve - amountOut); // New price after swap
+        uint256 newInputReserve = inputReserve + amountIn;
+        uint256 newOutputReserve = outputReserve - amountOut;
+        newPrice = (newInputReserve * 1e18) / newOutputReserve; // New price after swap
 
         return (amountOut, fee, newPrice);
     }
 
-    function getRequiredTokenAmount(uint256 amount1) external view returns (uint256 amount2) {
-        require(amount1 > 0, "Amount must be greater than zero");
-
+    function getRequiredTokenAmount(
+        address tokenIn,
+        uint256 amount
+    ) external view checkAmount(amount) returns (uint256 amountRequired) {
         uint256 token1Reserve = token1.balanceOf(address(this));
         uint256 token2Reserve = token2.balanceOf(address(this));
 
-        require(token1Reserve > 0 && token2Reserve > 0, "Pool reserves must be greater than zero");
+        if (token1Reserve <= 0 || token2Reserve <= 0) revert InvalidReserves();
 
-        amount2 = (amount1 * token2Reserve) / token1Reserve;
-
-        return amount2;
+        if (tokenIn == address(token1)) {
+            amountRequired = (amount * token2Reserve) / token1Reserve;
+        } else {
+            amountRequired = (amount * token1Reserve) / token2Reserve;
+        }
+        return amountRequired;
     }
 
-    function getCurrentPrices() external view returns (uint256 priceToken1InToken2, uint256 priceToken2InToken1) {
+    function getCurrentPrices()
+        external
+        view
+        returns (uint256 priceToken1InToken2, uint256 priceToken2InToken1)
+    {
         uint256 token1Reserve = token1.balanceOf(address(this));
         uint256 token2Reserve = token2.balanceOf(address(this));
 
-        require(token1Reserve > 0 && token2Reserve > 0, "Pool reserves must be greater than zero");
+        if (token1Reserve <= 0 || token2Reserve <= 0) revert InvalidReserves();
 
         priceToken1InToken2 = (token2Reserve * 1e18) / token1Reserve;
         priceToken2InToken1 = (token1Reserve * 1e18) / token2Reserve;
 
         return (priceToken1InToken2, priceToken2InToken1);
+    }
+
+    function getTokenPair(
+        address tokenIn
+    ) internal view returns (IERC20, IERC20) {
+        if (tokenIn == address(token1)) {
+            return (token1, token2);
+        } else if (tokenIn == address(token2)) {
+            return (token2, token1);
+        } else {
+            revert InvalidAddress();
+        }
     }
 
     function sqrt(uint256 x) internal pure returns (uint256 y) {

@@ -18,7 +18,8 @@ contract Staking is ReentrancyGuard, Ownable, Pausable {
     IERC20 public s_rewardToken;
 
     uint256 public rewardRate;
-    uint256 private totalStakedTokens;
+    uint256 public totalStakedTokens;
+    uint256 public totalBorrowedAmount;
     uint256 public rewardPerTokenStored;
     uint256 public lastUpdateTime;
     uint256 public interestRate; // Annual interest rate for loans
@@ -135,6 +136,8 @@ contract Staking is ReentrancyGuard, Ownable, Pausable {
 
         borrowedAmount[msg.sender] += amount;
         loanStartTime[msg.sender] = block.timestamp;
+        totalBorrowedAmount += amount;
+
         emit LoanTaken(msg.sender, amount);
         bool success = s_rewardToken.transfer(msg.sender, amount); // Use reward token for loans
         if (!success) revert TransferFailed();
@@ -153,6 +156,7 @@ contract Staking is ReentrancyGuard, Ownable, Pausable {
             "Transfer failed"
         );
         borrowedAmount[msg.sender] -= amount;
+        totalBorrowedAmount -= amount;
         if (borrowedAmount[msg.sender] == 0) {
             loanStartTime[msg.sender] = 0;
         }
