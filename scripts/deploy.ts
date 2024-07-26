@@ -3,13 +3,15 @@ import StakingTokenModule from "../ignition/modules/StakingToken";
 import RewardTokenModule from "../ignition/modules/RewardToken";
 import StakingModule from "../ignition/modules/Staking";
 import FaucetModule from "../ignition/modules/Faucet";
+import AMMModule from "../ignition/modules/AMM";
 
 async function main() {
-  // const initialSupply = 1000000n * 10n ** 18n; // 1,000,000 tokens with 18 decimals
-  const initialSupply = 100000; // 1,000,000 tokens with 18 decimals
-  // const faucetAmountAllowedPerPerson = 8n * 10n ** 18n; 
-  const faucetFundingAmount = ethers.parseUnits("1000", 18); 
-  const faucetAmountAllowedPerPerson = ethers.parseUnits("7", 18); 
+  const initialSupply = 100000; // 1,000,000 tokens
+  const faucetFundingAmount = ethers.parseUnits("1000", 18);
+  const faucetAmountAllowedPerPerson = ethers.parseUnits("7", 18);
+  const initialAmmSupply = ethers.parseUnits("5000", 18);
+  const rewardAmount = ethers.parseUnits("10000", 18);
+  const initialStakingApprove = ethers.parseUnits("2000", 18);
 
   const { stakingToken } = await hre.ignition.deploy(StakingTokenModule, {
     parameters: { StakingToken: { initialSupply: initialSupply } },
@@ -41,11 +43,27 @@ async function main() {
   console.log(`Staking deployed to: ${staking.target}`);
   console.log(`Faucet deployed to: ${faucet.target}`);
 
-  await stakingToken.approve(staking.target, initialSupply);
+  const { AMM } = await hre.ignition.deploy(AMMModule, {
+    parameters: {
+      Staking: {
+        stakingTokenAddress: stakingToken.target as string,
+        rewardTokenAddress: rewardToken.target as string,
+      },
+    },
+  });
+
+  console.log(`AMM deployed to: ${AMM.target}`);
+
+  await stakingToken.approve(AMM.target, initialAmmSupply);
+  await rewardToken.approve(AMM.target, initialAmmSupply);
+  console.log("approved initial supply AMM");
+
+  await AMM.provideLiquidity(initialAmmSupply, initialAmmSupply);
+  console.log("provided initial AMM supply liquidity");
+
+  await stakingToken.approve(staking.target, initialStakingApprove);
 
   // Transfer some reward tokens to the staking contract
-  // const rewardAmount = 100000n * 10n ** 18n; // 100,000 tokens with 18 decimals
-  const rewardAmount = ethers.parseUnits("10000", 18); 
   await rewardToken.transfer(staking.target, rewardAmount);
   await stakingToken.transfer(faucet.target, faucetFundingAmount);
 
@@ -53,9 +71,10 @@ async function main() {
     `Approved staking contract to spend tokens and funded with reward tokens.`
   );
   console.log(
-    `Funded the faucet contract with ${
-      ethers.formatUnits(faucetFundingAmount, 18)
-    } tokens.`
+    `Funded the faucet contract with ${ethers.formatUnits(
+      faucetFundingAmount,
+      18
+    )} tokens.`
   );
 }
 

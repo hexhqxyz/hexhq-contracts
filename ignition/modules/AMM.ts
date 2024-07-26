@@ -1,15 +1,15 @@
 import { buildModule } from "@nomicfoundation/hardhat-ignition/modules";
 
-const StakingModule = buildModule("Staking", (m) => {
+const AMMModule = buildModule("AMM", (m) => {
   const stakingTokenAddress = m.getParameter("stakingTokenAddress");
   const rewardTokenAddress = m.getParameter("rewardTokenAddress");
 
-  const staking = m.contract("Staking", [
+  const AMM = m.contract("AMM", [
     stakingTokenAddress,
     rewardTokenAddress,
   ]);
 
-  return { staking };
+  return { AMM };
 });
 
-export default StakingModule;
+export default AMMModule;
