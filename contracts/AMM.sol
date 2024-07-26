@@ -36,8 +36,7 @@ contract AMM is ReentrancyGuard, Ownable {
         address indexed tokenIn,
         address indexed tokenOut,
         uint256 amountIn,
-        uint256 amountOut,
-        uint256 fee
+        uint256 amountOut
     );
 
     constructor(address _token1, address _token2) Ownable(msg.sender) {
@@ -118,21 +117,12 @@ contract AMM is ReentrancyGuard, Ownable {
         checkAmounts(amountIn, minAmountOut)
         returns (uint256 amountOut, uint256 fee)
     {
-        if(minAmountOut > amountIn) revert InvalidAmounts();
+        if (minAmountOut > amountIn) revert InvalidAmounts();
+        (amountOut, fee, ) = getSwapDetails(tokenIn, amountIn);
+        if (amountOut < minAmountOut) revert SlippageExceeded();
         (IERC20 inputToken, IERC20 outputToken) = getTokenPair(tokenIn);
 
-        uint256 inputReserve = inputToken.balanceOf(address(this));
-        uint256 outputReserve = outputToken.balanceOf(address(this));
         inputToken.transferFrom(msg.sender, address(this), amountIn);
-
-        fee = (amountIn * swapFee) / 1e20; // Calculate fee as a percentage
-        uint256 inputAmountWithFee = amountIn - fee; // Apply fee
-        uint256 numerator = inputAmountWithFee * outputReserve;
-        uint256 denominator = inputReserve + inputAmountWithFee;
-        amountOut = numerator / denominator;
-
-        if (amountOut < minAmountOut) revert SlippageExceeded();
-
         outputToken.transfer(msg.sender, amountOut);
 
         emit Swapped(
@@ -140,8 +130,7 @@ contract AMM is ReentrancyGuard, Ownable {
             tokenIn,
             address(outputToken),
             amountIn,
-            amountOut,
-            fee
+            amountOut
         );
     }
 
@@ -149,7 +138,7 @@ contract AMM is ReentrancyGuard, Ownable {
         address tokenIn,
         uint256 amountIn
     )
-        external
+        public
         view
         checkAmount(amountIn)
         returns (uint256 amountOut, uint256 fee, uint256 newPrice)
