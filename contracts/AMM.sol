@@ -13,6 +13,7 @@ contract AMM is ReentrancyGuard, Ownable {
     error InvalidAddress();
     error InvalidReserves();
     error PoolRatioMismatch();
+    error SlippageExceeded();
 
     IERC20 public token1;
     IERC20 public token2;
@@ -109,13 +110,15 @@ contract AMM is ReentrancyGuard, Ownable {
      */
     function swap(
         address tokenIn,
-        uint256 amountIn
+        uint256 amountIn,
+        uint256 minAmountOut
     )
         external
         nonReentrant
-        checkAmount(amountIn)
+        checkAmounts(amountIn, minAmountOut)
         returns (uint256 amountOut, uint256 fee)
     {
+        if(minAmountOut > amountIn) revert InvalidAmounts();
         (IERC20 inputToken, IERC20 outputToken) = getTokenPair(tokenIn);
 
         uint256 inputReserve = inputToken.balanceOf(address(this));
@@ -127,6 +130,8 @@ contract AMM is ReentrancyGuard, Ownable {
         uint256 numerator = inputAmountWithFee * outputReserve;
         uint256 denominator = inputReserve + inputAmountWithFee;
         amountOut = numerator / denominator;
+
+        if (amountOut < minAmountOut) revert SlippageExceeded();
 
         outputToken.transfer(msg.sender, amountOut);
 
