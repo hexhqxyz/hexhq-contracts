@@ -59,7 +59,7 @@ async function main() {
   await rewardToken.approve(AMM.target, initialAmmSupply);
   console.log("approved initial supply AMM");
 
-  await AMM.provideLiquidity(initialAmmSupply, initialAmmSupply);
+  await AMM.provideLiquidity(stakingToken.target, initialAmmSupply);
   console.log("provided initial AMM supply liquidity");
 
   await stakingToken.approve(staking.target, initialStakingApprove);
