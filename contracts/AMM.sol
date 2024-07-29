@@ -12,7 +12,6 @@ contract AMM is ReentrancyGuard, Ownable {
     error InvalidAmounts();
     error InvalidAddress();
     error InvalidReserves();
-    error PoolRatioMismatch();
     error SlippageExceeded();
 
     IERC20 public token1;
@@ -56,27 +55,35 @@ contract AMM is ReentrancyGuard, Ownable {
     }
 
     function provideLiquidity(
-        uint256 amount1,
-        uint256 amount2
-    ) external nonReentrant checkAmounts(amount1, amount2) {
-        uint256 token1Reserve = token1.balanceOf(address(this));
-        uint256 token2Reserve = token2.balanceOf(address(this));
+        address tokenIn,
+        uint256 amountIn
+    ) external nonReentrant checkAmount(amountIn) {
+        (IERC20 inputToken, IERC20 outputToken) = getTokenPair(tokenIn);
 
-        if (totalLiquidity > 0) {
-            if (amount1 * token2Reserve != amount2 * token1Reserve)
-                revert PoolRatioMismatch();
+        uint256 inputReserve = inputToken.balanceOf(address(this));
+        uint256 outputReserve = outputToken.balanceOf(address(this));
+
+        uint256 amountOut;
+        if (inputReserve == 0 || outputReserve == 0) {
+            amountOut = amountIn; // In initial state, assume equal value
+        } else {
+            amountOut = getRequiredTokenAmount(tokenIn, amountIn);
         }
 
-        token1.transferFrom(msg.sender, address(this), amount1);
-        token2.transferFrom(msg.sender, address(this), amount2);
+        // Transfer tokens to the contract
+        inputToken.transferFrom(msg.sender, address(this), amountIn);
+        outputToken.transferFrom(msg.sender, address(this), amountOut);
 
-        uint256 liquidityMinted = (totalLiquidity == 0)
-            ? sqrt(amount1 * amount2)
-            : (amount1 * totalLiquidity) / token1Reserve;
+        uint256 liquidityMinted;
+        if (totalLiquidity == 0) {
+            liquidityMinted = sqrt(amountIn * amountOut);
+        } else {
+            liquidityMinted = (amountIn * totalLiquidity) / inputReserve;
+        }
         liquidity[msg.sender] += liquidityMinted;
         totalLiquidity += liquidityMinted;
 
-        emit LiquidityProvided(msg.sender, amount1, amount2);
+        emit LiquidityProvided(msg.sender, amountIn, amountOut);
     }
 
     function removeLiquidity(
@@ -164,7 +171,7 @@ contract AMM is ReentrancyGuard, Ownable {
     function getRequiredTokenAmount(
         address tokenIn,
         uint256 amount
-    ) external view checkAmount(amount) returns (uint256 amountRequired) {
+    ) public view checkAmount(amount) returns (uint256 amountRequired) {
         uint256 token1Reserve = token1.balanceOf(address(this));
         uint256 token2Reserve = token2.balanceOf(address(this));
 
