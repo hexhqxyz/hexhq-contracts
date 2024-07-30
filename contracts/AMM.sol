@@ -168,6 +168,37 @@ contract AMM is ReentrancyGuard, Ownable {
         return (amountOut, fee, newPrice);
     }
 
+    function getUserLiquidity(
+        address user
+    ) external view returns (uint256 token1Amount, uint256 token2Amount) {
+        uint256 userLiquidity = liquidity[user];
+        if (userLiquidity == 0) return (0, 0);
+
+        token1Amount =
+            (userLiquidity * token1.balanceOf(address(this))) /
+            totalLiquidity;
+        token2Amount =
+            (userLiquidity * token2.balanceOf(address(this))) /
+            totalLiquidity;
+    }
+
+    function calculateUserLiquidityWithdrawal(
+        address user,
+        uint256 percentInWei
+    ) external view returns (uint256 token1Amount, uint256 token2Amount) {
+        uint256 userLiquidity = liquidity[user];
+        if (userLiquidity == 0) return (0, 0);
+
+        uint256 liquidityAmount = (userLiquidity * percentInWei) / 1e20;
+
+        token1Amount =
+            (liquidityAmount * token1.balanceOf(address(this))) /
+            totalLiquidity;
+        token2Amount =
+            (liquidityAmount * token2.balanceOf(address(this))) /
+            totalLiquidity;
+    }
+
     function getRequiredTokenAmount(
         address tokenIn,
         uint256 amount
