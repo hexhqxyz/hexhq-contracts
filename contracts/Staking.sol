@@ -7,16 +7,23 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/Pausable.sol";
 
+/**
+ * @title Staking Contract
+ * @dev Implements staking, reward distribution, and loan functionalities with interest calculation.
+ */
 contract Staking is ReentrancyGuard, Ownable, Pausable {
+    // Custom errors for efficient error handling
     error AmountMustBeGreaterThanZero();
     error AmountNotEnough();
     error TransferFailed();
     error LoanNotRepaid();
     error InsufficientCollateral();
 
+    // State variables for staking and reward tokens
     IERC20 public s_stakingToken;
     IERC20 public s_rewardToken;
 
+    // Variables to track reward rate, staked tokens, and borrowing details
     uint256 public rewardRate;
     uint256 public totalStakedTokens;
     uint256 public totalBorrowedAmount;
@@ -24,12 +31,14 @@ contract Staking is ReentrancyGuard, Ownable, Pausable {
     uint256 public lastUpdateTime;
     uint256 public interestRate; // Annual interest rate for loans
 
+    // Mappings to track user balances and rewards
     mapping(address => uint256) public stakedBalance;
     mapping(address => uint256) public rewards;
     mapping(address => uint256) public userRewardPerTokenPaid;
     mapping(address => uint256) public borrowedAmount;
     mapping(address => uint256) public loanStartTime;
 
+    // Events for logging important actions
     event Staked(address indexed user, uint256 indexed amount);
     event Withdrawn(address indexed user, uint256 indexed amount);
     event RewardsClaimed(address indexed user, uint256 indexed amount);
@@ -38,6 +47,11 @@ contract Staking is ReentrancyGuard, Ownable, Pausable {
     event LoanTaken(address indexed user, uint256 indexed amount);
     event LoanRepaid(address indexed user, uint256 indexed amount);
 
+    /**
+     * @dev Constructor to initialize the staking and reward tokens.
+     * @param stakingToken Address of the staking token.
+     * @param rewardToken Address of the reward token.
+     */
     constructor(address stakingToken, address rewardToken) Ownable(msg.sender) {
         s_stakingToken = IERC20(stakingToken);
         s_rewardToken = IERC20(rewardToken);
@@ -45,15 +59,10 @@ contract Staking is ReentrancyGuard, Ownable, Pausable {
         interestRate = 5; // 5% annual interest rate
     }
 
-    function setRewardRate(uint256 _rewardRate) external onlyOwner {
-        rewardRate = _rewardRate;
-        emit RewardRateUpdated(_rewardRate);
-    }
-
-    function setInterestRate(uint256 _interestRate) external onlyOwner {
-        interestRate = _interestRate;
-    }
-
+    /**
+     * @dev Calculates the reward per token based on the elapsed time and total staked tokens.
+     * @return Updated reward per token.
+     */
     function rewardPerToken() public view returns (uint256) {
         if (totalStakedTokens == 0) {
             return rewardPerTokenStored;
@@ -64,6 +73,11 @@ contract Staking is ReentrancyGuard, Ownable, Pausable {
             rewardPerTokenStored + ((totalRewards * 1e18) / totalStakedTokens);
     }
 
+    /**
+     * @dev Calculates the earned rewards for a given account.
+     * @param account Address of the account.
+     * @return Earned rewards for the account.
+     */
     function earned(address account) public view returns (uint256) {
         uint256 effectiveStakedBalance = stakedBalance[account] -
             borrowedAmount[account];
@@ -74,6 +88,7 @@ contract Staking is ReentrancyGuard, Ownable, Pausable {
             rewards[account];
     }
 
+    // Modifier to update reward data for an account
     modifier updateReward(address account) {
         rewardPerTokenStored = rewardPerToken();
         lastUpdateTime = block.timestamp;
@@ -82,6 +97,10 @@ contract Staking is ReentrancyGuard, Ownable, Pausable {
         _;
     }
 
+    /**
+     * @dev Allows users to stake tokens in the contract.
+     * @param amount Amount of tokens to stake.
+     */
     function stake(
         uint256 amount
     ) external nonReentrant whenNotPaused updateReward(msg.sender) {
@@ -97,6 +116,10 @@ contract Staking is ReentrancyGuard, Ownable, Pausable {
         if (!success) revert TransferFailed();
     }
 
+    /**
+     * @dev Allows users to withdraw staked tokens from the contract.
+     * @param amount Amount of tokens to withdraw.
+     */
     function withdrawStakedTokens(
         uint256 amount
     ) external nonReentrant whenNotPaused updateReward(msg.sender) {
@@ -111,6 +134,9 @@ contract Staking is ReentrancyGuard, Ownable, Pausable {
         if (!success) revert TransferFailed();
     }
 
+    /**
+     * @dev Allows users to claim their earned rewards.
+     */
     function getReward()
         external
         nonReentrant
@@ -128,6 +154,10 @@ contract Staking is ReentrancyGuard, Ownable, Pausable {
         if (!success) revert TransferFailed();
     }
 
+    /**
+     * @dev Allows users to take a loan against their staked tokens.
+     * @param amount Amount of the loan to take.
+     */
     function takeLoan(uint256 amount) external nonReentrant whenNotPaused {
         if (amount <= 0) revert AmountMustBeGreaterThanZero();
         if (borrowedAmount[msg.sender] > 0) revert LoanNotRepaid();
@@ -143,6 +173,10 @@ contract Staking is ReentrancyGuard, Ownable, Pausable {
         if (!success) revert TransferFailed();
     }
 
+    /**
+     * @dev Allows users to repay their loans.
+     * @param amount Amount of the loan to repay.
+     */
     function repayLoan(uint256 amount) external nonReentrant whenNotPaused {
         if (amount <= 0) revert AmountMustBeGreaterThanZero();
         if (borrowedAmount[msg.sender] < amount) revert AmountNotEnough();
@@ -163,6 +197,13 @@ contract Staking is ReentrancyGuard, Ownable, Pausable {
         emit LoanRepaid(msg.sender, amount);
     }
 
+    // ---------------     View only function    -------------------
+
+    /**
+     * @dev Calculates the interest on the loan for a given account.
+     * @param account Address of the account.
+     * @return Interest amount.
+     */
     function calculateInterest(address account) public view returns (uint256) {
         uint256 timeElapsed = ((block.timestamp - loanStartTime[account]) /
             20) * 20; // Round down to the nearest 20 seconds
@@ -171,20 +212,22 @@ contract Staking is ReentrancyGuard, Ownable, Pausable {
         return interest;
     }
 
-    function pause() external onlyOwner {
-        _pause();
-    }
-
-    function unpause() external onlyOwner {
-        _unpause();
-    }
-
+    /**
+     * @dev Returns the borrowed balance of an account.
+     * @param account Address of the account.
+     * @return Borrowed amount.
+     */
     function borrowedBalanceOf(
         address account
     ) external view returns (uint256) {
         return borrowedAmount[account];
     }
 
+    /**
+     * @dev Calculates the borrowing limit for an account.
+     * @param account Address of the account.
+     * @return Borrowing limit.
+     */
     function calculateBorrowLimit(
         address account
     ) external view returns (uint256) {
@@ -199,5 +242,38 @@ contract Staking is ReentrancyGuard, Ownable, Pausable {
     ) external view returns (uint256) {
         uint256 interest = calculateInterest(account);
         return borrowedAmount[account] + interest;
+    }
+
+    // ---------------     Only Owner functions    -------------------
+
+    /**
+     * @dev Allows the owner to set the reward rate.
+     * @param _rewardRate New reward rate.
+     */
+    function setRewardRate(uint256 _rewardRate) external onlyOwner {
+        rewardRate = _rewardRate;
+        emit RewardRateUpdated(_rewardRate);
+    }
+
+    /**
+     * @dev Allows the owner to set the interest rate for loans.
+     * @param _interestRate New interest rate.
+     */
+    function setInterestRate(uint256 _interestRate) external onlyOwner {
+        interestRate = _interestRate;
+    }
+
+    /**
+     * @dev Pauses the contract. Can only be called by the owner.
+     */
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    /**
+     * @dev Unpauses the contract. Can only be called by the owner.
+     */
+    function unpause() external onlyOwner {
+        _unpause();
     }
 }

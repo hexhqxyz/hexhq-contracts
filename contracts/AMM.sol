@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
+/**
+ * @title Automated Market Maker (AMM) Contract
+ * @dev Implements a basic AMM with liquidity provision and token swapping functionality.
+ */
 contract AMM is ReentrancyGuard, Ownable {
+    // Custom errors for more efficient error handling
     error AmountMustBeGreaterThanZero();
     error InsufficientLiquidity();
     error InvalidAmounts();
@@ -14,12 +18,16 @@ contract AMM is ReentrancyGuard, Ownable {
     error InvalidReserves();
     error SlippageExceeded();
 
-    IERC20 public token1;
-    IERC20 public token2;
+    // State variables to hold references to the ERC20 tokens
+    IERC20 public immutable token1;
+    IERC20 public immutable token2;
     uint256 public totalLiquidity;
-    mapping(address => uint256) public liquidity;
     uint256 public swapFee;
 
+    // Mappings
+    mapping(address => uint256) public liquidity;
+
+    // Events for logging important actions
     event LiquidityProvided(
         address indexed provider,
         uint256 indexed amount1,
@@ -38,27 +46,43 @@ contract AMM is ReentrancyGuard, Ownable {
         uint256 amountOut
     );
 
+    /**
+     * @dev Constructor to initialize the contract with the two ERC20 tokens.
+     * @param _token1 Address of the first ERC20 token.
+     * @param _token2 Address of the second ERC20 token.
+     */
     constructor(address _token1, address _token2) Ownable(msg.sender) {
+        if (_token1 == address(0) || _token2 == address(0)) {
+            revert InvalidAddress();
+        }
+
         token1 = IERC20(_token1);
         token2 = IERC20(_token2);
         swapFee = 1e18; // 1% fee represented as 1e18
     }
 
+    // Modifier to check if the amount is greater than zero
     modifier checkAmount(uint256 amount) {
-        if (amount <= 0) revert AmountMustBeGreaterThanZero();
+        if (amount == 0) revert AmountMustBeGreaterThanZero();
         _;
     }
 
+    // Modifier to check if both amounts are greater than zero
     modifier checkAmounts(uint256 amount1, uint256 amount2) {
-        if (amount1 <= 0 || amount2 <= 0) revert AmountMustBeGreaterThanZero();
+        if (amount1 == 0 || amount2 == 0) revert AmountMustBeGreaterThanZero();
         _;
     }
 
+    /**
+     * @dev Allows users to provide liquidity to the AMM.
+     * @param tokenIn Address of the token to be provided.
+     * @param amountIn Amount of the token to be provided.
+     */
     function provideLiquidity(
         address tokenIn,
         uint256 amountIn
     ) external nonReentrant checkAmount(amountIn) {
-        (IERC20 inputToken, IERC20 outputToken) = getTokenPair(tokenIn);
+        (IERC20 inputToken, IERC20 outputToken) = _getTokenPair(tokenIn);
 
         uint256 inputReserve = inputToken.balanceOf(address(this));
         uint256 outputReserve = outputToken.balanceOf(address(this));
@@ -76,7 +100,7 @@ contract AMM is ReentrancyGuard, Ownable {
 
         uint256 liquidityMinted;
         if (totalLiquidity == 0) {
-            liquidityMinted = sqrt(amountIn * amountOut);
+            liquidityMinted = _sqrt(amountIn * amountOut);
         } else {
             liquidityMinted = (amountIn * totalLiquidity) / inputReserve;
         }
@@ -86,6 +110,10 @@ contract AMM is ReentrancyGuard, Ownable {
         emit LiquidityProvided(msg.sender, amountIn, amountOut);
     }
 
+    /**
+     * @dev Allows users to remove liquidity from the AMM.
+     * @param liquidityAmount Amount of liquidity to be removed.
+     */
     function removeLiquidity(
         uint256 liquidityAmount
     ) external nonReentrant checkAmount(liquidityAmount) {
@@ -111,6 +139,7 @@ contract AMM is ReentrancyGuard, Ownable {
      * @dev The amount of input tokens must be greater than zero.
      * @param tokenIn Address of the ERC20 token to swap from. It should be either `address(token1)` or `address(token2)`.
      * @param amountIn Amount of input tokens to swap.
+     * @param minAmountOut Minimum amount of output tokens expected to receive.
      * @return amountOut Returns the amount of output tokens received.
      * @return fee Returns the fee charged for this swap.
      */
@@ -127,7 +156,7 @@ contract AMM is ReentrancyGuard, Ownable {
         if (minAmountOut > amountIn) revert InvalidAmounts();
         (amountOut, fee, ) = getSwapDetails(tokenIn, amountIn);
         if (amountOut < minAmountOut) revert SlippageExceeded();
-        (IERC20 inputToken, IERC20 outputToken) = getTokenPair(tokenIn);
+        (IERC20 inputToken, IERC20 outputToken) = _getTokenPair(tokenIn);
 
         inputToken.transferFrom(msg.sender, address(this), amountIn);
         outputToken.transfer(msg.sender, amountOut);
@@ -141,6 +170,14 @@ contract AMM is ReentrancyGuard, Ownable {
         );
     }
 
+    /**
+     * @notice Provides the details of a potential swap.
+     * @param tokenIn Address of the token to swap from.
+     * @param amountIn Amount of the token to swap.
+     * @return amountOut Amount of output tokens received.
+     * @return fee Fee charged for the swap.
+     * @return newPrice New price after the swap.
+     */
     function getSwapDetails(
         address tokenIn,
         uint256 amountIn
@@ -150,7 +187,7 @@ contract AMM is ReentrancyGuard, Ownable {
         checkAmount(amountIn)
         returns (uint256 amountOut, uint256 fee, uint256 newPrice)
     {
-        (IERC20 inputToken, IERC20 outputToken) = getTokenPair(tokenIn);
+        (IERC20 inputToken, IERC20 outputToken) = _getTokenPair(tokenIn);
 
         uint256 inputReserve = inputToken.balanceOf(address(this));
         uint256 outputReserve = outputToken.balanceOf(address(this));
@@ -168,6 +205,12 @@ contract AMM is ReentrancyGuard, Ownable {
         return (amountOut, fee, newPrice);
     }
 
+    /**
+     * @notice Returns the liquidity details for a user.
+     * @param user Address of the user.
+     * @return token1Amount Amount of token1 the user can withdraw.
+     * @return token2Amount Amount of token2 the user can withdraw.
+     */
     function getUserLiquidity(
         address user
     ) external view returns (uint256 token1Amount, uint256 token2Amount) {
@@ -182,6 +225,13 @@ contract AMM is ReentrancyGuard, Ownable {
             totalLiquidity;
     }
 
+    /**
+     * @notice Calculates the withdrawal amount of liquidity based on a percentage.
+     * @param user Address of the user.
+     * @param percentInWei Percentage of liquidity to withdraw (in Wei).
+     * @return token1Amount Amount of token1 the user can withdraw.
+     * @return token2Amount Amount of token2 the user can withdraw.
+     */
     function calculateUserLiquidityWithdrawal(
         address user,
         uint256 percentInWei
@@ -199,6 +249,12 @@ contract AMM is ReentrancyGuard, Ownable {
             totalLiquidity;
     }
 
+    /**
+     * @notice Returns the required amount of the other token to provide given an input token amount.
+     * @param tokenIn Address of the token to provide.
+     * @param amount Amount of the token to provide.
+     * @return amountRequired Amount of the other token required.
+     */
     function getRequiredTokenAmount(
         address tokenIn,
         uint256 amount
@@ -216,6 +272,11 @@ contract AMM is ReentrancyGuard, Ownable {
         return amountRequired;
     }
 
+    /**
+     * @notice Returns the current prices of the tokens in the AMM.
+     * @return priceToken1InToken2 Price of token1 in terms of token2.
+     * @return priceToken2InToken1 Price of token2 in terms of token1.
+     */
     function getCurrentPrices()
         external
         view
@@ -232,7 +293,15 @@ contract AMM is ReentrancyGuard, Ownable {
         return (priceToken1InToken2, priceToken2InToken1);
     }
 
-    function getTokenPair(
+
+    // Internal utility Functions
+
+    /**
+     * @notice Returns the token pair for the provided token address.
+     * @param tokenIn Address of the input token.
+     * @return IERC20, IERC20 The input token and the other token in the pair.
+     */
+    function _getTokenPair(
         address tokenIn
     ) internal view returns (IERC20, IERC20) {
         if (tokenIn == address(token1)) {
@@ -244,7 +313,12 @@ contract AMM is ReentrancyGuard, Ownable {
         }
     }
 
-    function sqrt(uint256 x) internal pure returns (uint256 y) {
+    /**
+     * @notice Calculates the square root of a given number.
+     * @param x The number to calculate the square root of.
+     * @return y The calculated square root.
+     */
+    function _sqrt(uint256 x) internal pure returns (uint256 y) {
         uint256 z = (x + 1) / 2;
         y = x;
         while (z < y) {
