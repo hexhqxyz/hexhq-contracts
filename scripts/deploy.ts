@@ -7,8 +7,9 @@ import AMMModule from "../ignition/modules/AMM";
 
 const TOKEN_DECIMAL = 18;
 async function main() {
+  const gasLimit = 500000;
   const initialSupply = 100000; // 1,000,000 tokens
-  const faucetFundingAmount = ethers.parseUnits("1000", TOKEN_DECIMAL);
+  const faucetFundingAmount = ethers.parseUnits("2000", TOKEN_DECIMAL);
   const faucetAmountAllowedPerPerson = ethers.parseUnits("8", TOKEN_DECIMAL);
   const initialAmmSupply = ethers.parseUnits("5000", TOKEN_DECIMAL);
   const rewardAmount = ethers.parseUnits("10000", TOKEN_DECIMAL);
@@ -37,7 +38,7 @@ async function main() {
       Faucet: {
         stakingTokenAddress: stakingToken.target as string,
         amountAllowed: faucetAmountAllowedPerPerson,
-        claimInterval: 10,
+        claimInterval: 86400,
       },
     },
   });
@@ -59,7 +60,9 @@ async function main() {
   await rewardToken.approve(AMM.target, initialAmmSupply);
   console.log("approved initial supply AMM");
 
-  await AMM.provideLiquidity(stakingToken.target, initialAmmSupply);
+  await AMM.provideLiquidity(stakingToken.target, initialAmmSupply, {
+    gasLimit: gasLimit,
+  });
   console.log("provided initial AMM supply liquidity");
 
   await stakingToken.approve(staking.target, initialStakingApprove);
@@ -71,9 +74,7 @@ async function main() {
   console.log(
     `Approved staking contract to spend tokens and funded with reward tokens.`
   );
-  console.log(
-    `Funded the faucet contract with 1000 tokens.`
-  );
+  console.log(`Funded the faucet contract with 1000 tokens.`);
 }
 
 main().catch(console.error);

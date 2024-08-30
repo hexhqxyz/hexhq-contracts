@@ -55,7 +55,7 @@ contract Staking is ReentrancyGuard, Ownable, Pausable {
     constructor(address stakingToken, address rewardToken) Ownable(msg.sender) {
         s_stakingToken = IERC20(stakingToken);
         s_rewardToken = IERC20(rewardToken);
-        rewardRate = 1e15; // Initial reward rate
+        rewardRate = 1e10; // Initial reward rate
         interestRate = 5; // 5% annual interest rate
     }
 

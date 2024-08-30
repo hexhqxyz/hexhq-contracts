@@ -9,8 +9,6 @@ node_modules
 /typechain
 /typechain-types
 
-/ignition/deployments
-
 # solidity-coverage files
 /coverage
 /coverage.json
