@@ -14,6 +14,11 @@ const config: HardhatUserConfig = {
       accounts: [SEPOLIA_PRIVATE_KEY],
       chainId: 11155111,
     },
+    ethHoleskyTestnet: {
+      url: "https://ethereum-holesky-rpc.publicnode.com",
+      chainId: 17000,
+      accounts: [SEPOLIA_PRIVATE_KEY],
+    },
     polygonAmoyTestnet: {
       url: "https://rpc-amoy.polygon.technology",
       accounts: [SEPOLIA_PRIVATE_KEY],
