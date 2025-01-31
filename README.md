@@ -1,6 +1,6 @@
-# AstraDeFi Smart Contracts
+# HexHq Smart Contracts
 
-This repository contains the Solidity smart contracts and subgraph configurations for the AstraDeFi platform. The contracts cover a wide range of DeFi functionalities, including staking, rewards, liquidity provision, automated market makers (AMM), and more. These contracts are deployed across multiple test networks to ensure broad coverage and scalability.
+This repository contains the Solidity smart contracts and subgraph configurations for the HexHq platform. The contracts cover a wide range of DeFi functionalities, including staking, rewards, liquidity provision, automated market makers (AMM), and more. These contracts are deployed across multiple test networks to ensure broad coverage and scalability.
 
 ## 📜 Contracts Overview
 
